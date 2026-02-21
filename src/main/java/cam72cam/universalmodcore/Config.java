@@ -50,7 +50,9 @@ public class Config {
             this.dependencies = data.get("dependencies").getAsJsonObject().entrySet().stream()
                     .map((e) -> new Dependency(e.getKey(), e.getValue().getAsJsonObject()))
                     .collect(Collectors.toList());
-            data.get("libraries").getAsJsonArray().forEach(e -> libraries.add(new Library(e.getAsJsonObject())));
+            if (data.has("libraries")) {
+                data.get("libraries").getAsJsonArray().forEach(e -> libraries.add(new Library(e.getAsJsonObject())));
+            }
         }
     }
 
