@@ -1,5 +1,6 @@
 package cam72cam.universalmodcore;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
@@ -11,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 public class Config {
     public final Mod mod;
@@ -26,6 +29,7 @@ public class Config {
         public final String id;
         public final String version;
         public final List<Dependency> dependencies;
+        public final List<Library> libraries = new ArrayList<>();
 
         public static class Dependency {
             public final String id;
@@ -49,6 +53,7 @@ public class Config {
             this.dependencies = data.get("dependencies").getAsJsonObject().entrySet().stream()
                     .map((e) -> new Dependency(e.getKey(), e.getValue().getAsJsonObject()))
                     .collect(Collectors.toList());
+            data.get("libraries").getAsJsonArray().forEach(e -> libraries.add(new Library(e.getAsJsonObject())));
         }
     }
 
@@ -74,6 +79,41 @@ public class Config {
         }
     }
 
+    public static class Library {
+        public final boolean isPath;
+        public final String id;
+        public final String repo;
+        public final boolean hasRelocation;
+        public String relocateFrom;
+        public String relocateTo;
+        public final String type;
+        public final List<String> onlyIn = new ArrayList<>();
+
+        public Library(JsonObject data) {
+            this.isPath = data.has("path");
+            this.id = isPath ? data.get("path").getAsString() : data.get("artifact").getAsString();
+
+            this.hasRelocation = data.has("relocate");
+
+            this.type = data.get("type").getAsString();
+
+            if (data.has("onlyIn")) {
+                data.get("onlyIn").getAsJsonArray().forEach(e -> onlyIn.add(e.getAsString()));
+            }
+
+            if (hasRelocation) {
+                String[] path = data.get("relocate").getAsString().replaceAll(" ", "").split("\\|");
+                if (path.length != 2) {
+                    throw new IllegalArgumentException("Relocate needs needs two paths separated by a '|'");
+                }
+                relocateFrom = path[0];
+                relocateTo = path[1];
+            }
+
+            this.repo = isPath ? "" : data.get("repository").getAsString();
+        }
+    }
+
     public Config(JsonObject data, String mcVersion, Loader brand) throws GitAPIException, IOException {
         mod = new Mod(data.get("mod").getAsJsonObject());
         integration = data.has("integration") ? new Integration(data.get("integration").getAsJsonObject()) : null;
@@ -90,6 +130,36 @@ public class Config {
         vars.put("LOADER_VERSION", minecraftLoader);
         vars.put("MINECRAFT", mcVersion);
         vars.put("LOADER", brand.toString());
+
+        StringBuilder libRepos = new StringBuilder();
+        StringBuilder depends = new StringBuilder();
+        StringBuilder relocate = new StringBuilder();
+
+        if (!mod.libraries.isEmpty()) {
+            for (Library library : mod.libraries) {
+                if (!library.onlyIn.isEmpty() && !library.onlyIn.contains(minecraftLoader)) {
+                    continue;
+                }
+
+                if (!library.repo.isEmpty()) {
+                    libRepos.append(String.format("\tmaven { url = \"%s\" }", library.repo)).append("\n");
+                }
+
+                if (library.hasRelocation) {
+                    relocate.append(String.format("\trelocate '%s', \"%s\"", library.relocateFrom, library.relocateTo)).append("\n");
+                }
+
+                if (library.isPath) {
+                    depends.append(String.format("\t%s files('%s')", library.type, library.id)).append("\n");
+                } else {
+                    depends.append(String.format("\t%s '%s'", library.type, library.id)).append("\n");
+                }
+            }
+        }
+
+        vars.put("LIB_REPOS", stripNewline(libRepos));
+        vars.put("SHADOW", stripNewline(depends));
+        vars.put("RELOCATE", stripNewline(relocate));
 
         String version = require("umc.version", umc.version);
 
@@ -131,11 +201,11 @@ public class Config {
             if (!jar.exists()) {
                 throw new RuntimeException(String.format("Unable to find UMC jar: %s", jar));
             }
-            vars.put("UMC_REPO", String.format("repositories { flatDir { dirs '%s' } }", jar.getParent()));
+            vars.put("UMC_REPO", String.format("flatDir { dirs '%s' }", jar.getParent()));
             vars.put("UMC_DEPENDENCY", String.format("name: '%s'", jar.getName().replace(".jar", "")));
             vars.put("UMC_FILE", jar.getPath());
         } else {
-            vars.put("UMC_REPO", "repositories { maven { url = \"https://teamopenindustry.cc/maven\" }}");
+            vars.put("UMC_REPO", "maven { url = \"https://teamopenindustry.cc/maven\" }");
             vars.put("UMC_DEPENDENCY", String.format("'cam72cam.universalmodcore:UniversalModCore:%s-%s'", minecraftLoader, version));
             vars.put("UMC_DOWNLOAD", String.format("https://teamopenindustry.cc/maven/cam72cam/universalmodcore/UniversalModCore/%s-%s/UniversalModCore-%s-%s.jar", minecraftLoader, version, minecraftLoader, version));
         }
@@ -180,6 +250,14 @@ public class Config {
         vars.put("FORGE_TOML_DEPENDENCIES", forgeTomlDependencies);
 
         vars.put("FABRIC_SOMETHING_DEPENDENCIES", "TODO");
+    }
+
+    private String stripNewline(StringBuilder sb) {
+        int len = sb.length();
+        if (len > 0 && sb.charAt(len - 1) == '\n') {
+            sb.deleteCharAt(len - 1);
+        }
+        return sb.toString();
     }
 
 
