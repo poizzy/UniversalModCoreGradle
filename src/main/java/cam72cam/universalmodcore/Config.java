@@ -157,8 +157,8 @@ public class Config {
         }
 
         vars.put("LIB_REPOS", stripNewline(libRepos));
-        vars.put("SHADOW", stripNewline(depends));
-        vars.put("RELOCATE", stripNewline(relocate));
+        vars.put("MOD_DEPENDENCIES", stripNewline(depends));
+        vars.put("RELOCATION", stripNewline(relocate));
 
         String version = require("umc.version", umc.version);
 
