@@ -149,7 +149,7 @@ public class Config {
             }
 
             if (library.isDir) {
-                flatDirs.add(library.repo);
+                flatDirs.add("'" + library.repo + "'");
             } else {
                 repoLines.add("\tmaven { url = \"" + library.repo + "\"");
             }
