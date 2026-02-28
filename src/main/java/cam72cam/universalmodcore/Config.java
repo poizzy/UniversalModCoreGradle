@@ -79,7 +79,7 @@ public class Config {
     }
 
     public static class Library {
-        public final boolean isPath;
+        public final boolean isDir;
         public final String id;
         public final String repo;
         public final boolean hasRelocation;
@@ -89,8 +89,16 @@ public class Config {
         public final List<String> onlyIn = new ArrayList<>();
 
         public Library(JsonObject data) {
-            this.isPath = data.has("path");
-            this.id = isPath ? data.get("path").getAsString() : data.get("artifact").getAsString();
+            this.id = data.get("artifact").getAsString();
+
+            String repoType = data.get("repositoryType").getAsString();
+
+            switch (repoType) {
+                case "URL": this.isDir = false; break;
+                case "Dir": this.isDir = true; break;
+                default: throw new IllegalArgumentException("The repository Type needs to be either \"URL\" or \"Dir\"");
+            }
+
 
             this.hasRelocation = data.has("relocate");
 
@@ -109,7 +117,7 @@ public class Config {
                 relocateTo = path[1];
             }
 
-            this.repo = isPath ? "" : data.get("repository").getAsString();
+            this.repo = data.get("repository").getAsString();
         }
     }
 
@@ -130,35 +138,41 @@ public class Config {
         vars.put("MINECRAFT", mcVersion);
         vars.put("LOADER", brand.toString());
 
-        StringBuilder libRepos = new StringBuilder();
-        StringBuilder depends = new StringBuilder();
-        StringBuilder relocate = new StringBuilder();
+        List<String> repoLines = new ArrayList<>();
+        List<String> depLines = new ArrayList<>();
+        List<String> relLines = new ArrayList<>();
+        List<String> flatDirs = new ArrayList<>();
 
-        if (!mod.libraries.isEmpty()) {
-            for (Library library : mod.libraries) {
-                if (!library.onlyIn.isEmpty() && !library.onlyIn.contains(minecraftLoader)) {
-                    continue;
-                }
-
-                if (!library.repo.isEmpty()) {
-                    libRepos.append(String.format("\tmaven { url = \"%s\" }", library.repo)).append("\n");
-                }
-
-                if (library.hasRelocation) {
-                    relocate.append(String.format("\trelocate '%s', \"%s\"", library.relocateFrom, library.relocateTo)).append("\n");
-                }
-
-                if (library.isPath) {
-                    depends.append(String.format("\t%s files('%s')", library.type, library.id)).append("\n");
-                } else {
-                    depends.append(String.format("\t%s '%s'", library.type, library.id)).append("\n");
-                }
+        for (Library library : mod.libraries) {
+            if (!library.onlyIn.isEmpty() && !library.onlyIn.contains(minecraftLoader)) {
+                continue;
             }
+
+            if (library.isDir) {
+                flatDirs.add(library.repo);
+            } else {
+                repoLines.add("\tmaven { url = \"" + library.repo + "\"");
+            }
+
+            if (library.hasRelocation) {
+                relLines.add("\trelocate'" + library.relocateFrom + "', \"" + library.relocateTo + "\"");
+            }
+
+            depLines.add("\t" + library.type + " '" + library.id + "'");
         }
 
-        vars.put("LIB_REPOS", stripNewline(libRepos));
-        vars.put("MOD_DEPENDENCIES", stripNewline(depends));
-        vars.put("RELOCATION", stripNewline(relocate));
+        if (!flatDirs.isEmpty()) {
+            String flatDirBlock =
+                    "\tflatDir {\n" +
+                            "\t\tdirs " + String.join(", ", flatDirs) +  "\n" +
+                    "\t}";
+
+            repoLines.add(0, flatDirBlock);
+        }
+
+        vars.put("LIB_REPOS", String.join("\n", repoLines));
+        vars.put("MOD_DEPENDENCIES", String.join("\n", depLines));
+        vars.put("RELOCATION", String.join("\n", relLines));
 
         String version = require("umc.version", umc.version);
 
@@ -249,14 +263,6 @@ public class Config {
         vars.put("FORGE_TOML_DEPENDENCIES", forgeTomlDependencies);
 
         vars.put("FABRIC_SOMETHING_DEPENDENCIES", "TODO");
-    }
-
-    private String stripNewline(StringBuilder sb) {
-        int len = sb.length();
-        if (len > 0 && sb.charAt(len - 1) == '\n') {
-            sb.deleteCharAt(len - 1);
-        }
-        return sb.toString();
     }
 
 
